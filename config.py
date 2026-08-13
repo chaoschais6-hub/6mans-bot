@@ -9,3 +9,5 @@ if GUILD_ID:
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 DB_PATH = os.path.join(DATA_DIR, "sixmans.db")
+
+RL_TRACKER_API_KEY = os.environ.get("RL_TRACKER_API_KEY", "")

@@ -50,6 +50,14 @@ def _init_schema(conn):
             base_mmr INTEGER NOT NULL DEFAULT 1000,
             role_mmr TEXT NOT NULL DEFAULT '{}'
         );
+
+        CREATE TABLE IF NOT EXISTS rl_links (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            platform TEXT NOT NULL,
+            username TEXT NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
         """
     )
 
@@ -285,3 +293,34 @@ def report_match(match_id, score1, score2, reported_by):
     )
     conn.commit()
     return cur.rowcount == 1
+
+
+# ---- RL Tracker links -------------------------------------------------
+
+
+def set_rl_link(guild_id, user_id, platform, username):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO rl_links (guild_id, user_id, platform, username) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(guild_id, user_id) DO UPDATE SET platform = excluded.platform, "
+        "username = excluded.username",
+        (guild_id, user_id, platform, username),
+    )
+    conn.commit()
+
+
+def get_rl_link(guild_id, user_id):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT platform, username FROM rl_links WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def clear_rl_link(guild_id, user_id):
+    conn = _get_conn()
+    conn.execute(
+        "DELETE FROM rl_links WHERE guild_id = ? AND user_id = ?", (guild_id, user_id)
+    )
+    conn.commit()

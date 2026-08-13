@@ -18,7 +18,7 @@ class SixMansBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        for cog in ("queue", "matches", "mmr", "settings", "admin"):
+        for cog in ("queue", "matches", "mmr", "settings", "admin", "rltracker"):
             await self.load_extension(f"cogs.{cog}")
 
         if config.GUILD_ID:
