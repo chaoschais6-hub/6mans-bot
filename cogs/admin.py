@@ -67,6 +67,40 @@ class AdminCog(commands.Cog, name="Admin"):
         )
 
     @app_commands.command(
+        name="setrolemmr",
+        description="[Admin] Set an MMR for everyone holding a role",
+    )
+    @app_commands.describe(
+        role="Role to assign MMR to (all members with this role use it)",
+        mmr="MMR value (0-9999)",
+    )
+    @app_commands.default_permissions(administrator=True)
+    async def setrolemmr(self, interaction: discord.Interaction, role: discord.Role, mmr: int):
+        if mmr < 0 or mmr > 9999:
+            await interaction.response.send_message(
+                "MMR must be between 0 and 9999.", ephemeral=True
+            )
+            return
+        db.set_role_mmr(interaction.guild.id, role.id, mmr)
+        await interaction.response.send_message(
+            f"Members with {role.mention} will now be rated at **{mmr}** MMR.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
+        name="removerolemmr",
+        description="[Admin] Remove a role's MMR override",
+    )
+    @app_commands.describe(role="Role whose MMR override to remove")
+    @app_commands.default_permissions(administrator=True)
+    async def removerolemmr(self, interaction: discord.Interaction, role: discord.Role):
+        db.set_role_mmr(interaction.guild.id, role.id, None)
+        await interaction.response.send_message(
+            f"Removed {role.mention}'s MMR override. They use their individual MMR.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(
         name="wipe_queue", description="[Admin] Clear the current queue"
     )
     @app_commands.default_permissions(administrator=True)

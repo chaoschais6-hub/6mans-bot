@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import database as db
+from ranks import progress
 
 
 class MMRCog(commands.Cog, name="MMR"):
@@ -16,6 +17,30 @@ class MMRCog(commands.Cog, name="MMR"):
             f"MMR: **{p['mmr']}**\n"
             f"Record: {p['wins']}W - {p['losses']}L\n"
             f"Win rate: {rate}",
+            ephemeral=False,
+        )
+
+    @app_commands.command(name="rank", description="Show a player's rank tier")
+    @app_commands.describe(user="Player to check (defaults to you)")
+    async def rank(self, interaction: discord.Interaction, user: discord.User = None):
+        user = user or interaction.user
+        member = interaction.guild.get_member(user.id)
+        p = db.get_player(interaction.guild.id, user.id)
+
+        role_mmr = None
+        if member is not None:
+            role_mmr = db.get_effective_mmr(interaction.guild.id, [r.id for r in member.roles])
+        mmr = role_mmr if role_mmr is not None else p["mmr"]
+
+        name, pct = progress(mmr)
+        bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
+
+        overridden = "\n*(role-based rating)*" if role_mmr is not None else ""
+        await interaction.response.send_message(
+            f"**{user.display_name}**\n"
+            f"Rank: **{name}**  `{bar}` {pct}% to next tier\n"
+            f"MMR: **{mmr}**\n"
+            f"Record: {p['wins']}W - {p['losses']}L{overridden}",
             ephemeral=False,
         )
 

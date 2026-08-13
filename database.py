@@ -47,7 +47,8 @@ def _init_schema(conn):
             guild_id INTEGER PRIMARY KEY,
             ping_role_id INTEGER,
             queue_channel_id INTEGER,
-            base_mmr INTEGER NOT NULL DEFAULT 1000
+            base_mmr INTEGER NOT NULL DEFAULT 1000,
+            role_mmr TEXT NOT NULL DEFAULT '{}'
         );
         """
     )
@@ -56,6 +57,8 @@ def _init_schema(conn):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(settings)").fetchall()]
     if "base_mmr" not in cols:
         conn.execute("ALTER TABLE settings ADD COLUMN base_mmr INTEGER NOT NULL DEFAULT 1000")
+    if "role_mmr" not in cols:
+        conn.execute("ALTER TABLE settings ADD COLUMN role_mmr TEXT NOT NULL DEFAULT '{}'")
 
     conn.commit()
 
@@ -85,9 +88,11 @@ def get_player(guild_id, user_id):
         (guild_id, user_id),
     ).fetchone()
     if row:
-        return dict(row)
+        p = dict(row)
+        p["is_new"] = False
+        return p
     base = get_base_mmr(guild_id)
-    return {"guild_id": guild_id, "user_id": user_id, "mmr": base, "wins": 0, "losses": 0}
+    return {"guild_id": guild_id, "user_id": user_id, "mmr": base, "wins": 0, "losses": 0, "is_new": True}
 
 
 def update_player(guild_id, user_id, *, mmr_new, won):
@@ -189,6 +194,46 @@ def get_base_mmr(guild_id):
         "SELECT base_mmr FROM settings WHERE guild_id = ?", (guild_id,)
     ).fetchone()
     return row["base_mmr"] if row else 1000
+
+
+def set_role_mmr(guild_id, role_id, mmr):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT role_mmr FROM settings WHERE guild_id = ?", (guild_id,)
+    ).fetchone()
+    role_mmr = json.loads(row["role_mmr"]) if row and row["role_mmr"] else {}
+    if mmr is None:
+        role_mmr.pop(str(role_id), None)
+    else:
+        role_mmr[str(role_id)] = mmr
+    conn.execute(
+        "INSERT INTO settings (guild_id, role_mmr) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET role_mmr = excluded.role_mmr",
+        (guild_id, json.dumps(role_mmr)),
+    )
+    conn.commit()
+
+
+def get_role_mmr_map(guild_id):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT role_mmr FROM settings WHERE guild_id = ?", (guild_id,)
+    ).fetchone()
+    if not row or not row["role_mmr"]:
+        return {}
+    return {int(k): v for k, v in json.loads(row["role_mmr"]).items()}
+
+
+def get_effective_mmr(guild_id, role_ids):
+    """Return the highest role-based MMR for a player's roles, or None."""
+    role_map = get_role_mmr_map(guild_id)
+    if not role_map:
+        return None
+    best = None
+    for rid in role_ids:
+        if rid in role_map:
+            best = max(best, role_map[rid]) if best is not None else role_map[rid]
+    return best
 
 
 # ---- Matches ---------------------------------------------------------

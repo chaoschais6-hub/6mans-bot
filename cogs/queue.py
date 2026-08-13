@@ -154,11 +154,20 @@ class QueueCog(commands.Cog, name="Queue"):
         del q[user.id]
         await channel.send(f"{user.mention} left the queue. **({len(q)}/6)**")
 
+    def _effective_mmr(self, guild, uid):
+        """Role-based MMR wins over individual MMR when configured."""
+        member = guild.get_member(uid)
+        if member is not None:
+            role_mmr = db.get_effective_mmr(guild.id, [r.id for r in member.roles])
+            if role_mmr is not None:
+                return role_mmr
+        return db.get_player(guild.id, uid)["mmr"]
+
     async def _start_match(self, interaction, guild, q):
         ids = list(q.keys())
         q.clear()
 
-        players = [(uid, db.get_player(guild.id, uid)["mmr"]) for uid in ids]
+        players = [(uid, self._effective_mmr(guild, uid)) for uid in ids]
         team_a, team_b = balance_teams(players)
 
         a_ids = [uid for uid, _ in team_a]
@@ -188,7 +197,7 @@ class QueueCog(commands.Cog, name="Queue"):
         ids = list(q.keys())
         q.clear()
 
-        players = [(uid, db.get_player(guild.id, uid)["mmr"]) for uid in ids]
+        players = [(uid, self._effective_mmr(guild, uid)) for uid in ids]
         team_a, team_b = balance_teams(players)
 
         a_ids = [uid for uid, _ in team_a]
