@@ -15,10 +15,13 @@ class QueueCog(commands.Cog, name="Queue"):
         return self._queues.setdefault(guild_id, {})
 
     def _check_channel(self, interaction: discord.Interaction) -> bool:
-        """Return True if command is allowed in this channel."""
+        """Return True if command is allowed in this channel.
+
+        Queueing is DISABLED until an admin locks a channel with /setchannel.
+        """
         allowed = db.get_queue_channel(interaction.guild.id)
         if allowed is None:
-            return True  # no restriction
+            return False
         return interaction.channel.id == allowed
 
     def _channel_lock_msg(self, interaction: discord.Interaction) -> str:
@@ -26,7 +29,7 @@ class QueueCog(commands.Cog, name="Queue"):
         if allowed:
             ch = interaction.guild.get_channel(allowed)
             return f"Commands are locked to {ch.mention if ch else f'<#{allowed}>'}."
-        return ""
+        return "Queueing is disabled. An admin must set a channel with `/setchannel`."
 
     group = app_commands.Group(name="queue", description="6mans queue commands")
 
@@ -120,7 +123,7 @@ class QueueCog(commands.Cog, name="Queue"):
     def _check_channel_prefix(self, ctx: commands.Context) -> bool:
         allowed = db.get_queue_channel(ctx.guild.id)
         if allowed is None:
-            return True
+            return False
         return ctx.channel.id == allowed
 
     def _channel_lock_msg_prefix(self, ctx: commands.Context) -> str:
@@ -128,7 +131,7 @@ class QueueCog(commands.Cog, name="Queue"):
         if allowed:
             ch = ctx.guild.get_channel(allowed)
             return f"Commands are locked to {ch.mention if ch else f'<#{allowed}>'}."
-        return ""
+        return "Queueing is disabled. An admin must set a channel with `/setchannel`."
 
     async def _do_join(self, guild, user, channel):
         q = self._queue(guild.id)

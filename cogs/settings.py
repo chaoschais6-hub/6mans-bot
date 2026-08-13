@@ -32,7 +32,9 @@ class SettingsCog(commands.Cog, name="Settings"):
         if channel is None:
             db.set_queue_channel(interaction.guild.id, None)
             await interaction.response.send_message(
-                "Channel lock removed. Commands work everywhere.", ephemeral=True
+                "Channel lock removed. Queueing is now DISABLED everywhere "
+                "until you set a channel again.",
+                ephemeral=True,
             )
         else:
             db.set_queue_channel(interaction.guild.id, channel.id)
@@ -50,7 +52,9 @@ class SettingsCog(commands.Cog, name="Settings"):
             )
         else:
             await interaction.response.send_message(
-                "No channel lock set. Commands work everywhere.", ephemeral=True
+                "No channel lock set. Queueing is DISABLED everywhere until an admin "
+                "sets a channel with `/setchannel`.",
+                ephemeral=True,
             )
 
 
