@@ -1,0 +1,16 @@
+app = "sixmans-bot"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DATA_DIR = "/data"
+
+# Persistent disk so MMR data survives restarts
+[mounts]
+  source = "sixmans_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

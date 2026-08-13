@@ -1,0 +1,206 @@
+import json
+import os
+import sqlite3
+from datetime import datetime, timezone
+
+import config
+
+_CONN = None
+
+
+def _get_conn():
+    global _CONN
+    if _CONN is None:
+        os.makedirs(config.DATA_DIR, exist_ok=True)
+        _CONN = sqlite3.connect(config.DB_PATH, check_same_thread=False)
+        _CONN.row_factory = sqlite3.Row
+        _CONN.execute("PRAGMA journal_mode=WAL")
+        _init_schema(_CONN)
+    return _CONN
+
+
+def _init_schema(conn):
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS players (
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            mmr INTEGER NOT NULL DEFAULT 1000,
+            wins INTEGER NOT NULL DEFAULT 0,
+            losses INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS matches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            team1 TEXT NOT NULL,
+            team2 TEXT NOT NULL,
+            score1 INTEGER,
+            score2 INTEGER,
+            status TEXT NOT NULL DEFAULT 'pending',
+            reported_by INTEGER,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS settings (
+            guild_id INTEGER PRIMARY KEY,
+            ping_role_id INTEGER,
+            queue_channel_id INTEGER
+        );
+        """
+    )
+    conn.commit()
+
+
+def _ensure_player(conn, guild_id, user_id):
+    conn.execute(
+        "INSERT OR IGNORE INTO players (guild_id, user_id) VALUES (?, ?)",
+        (guild_id, user_id),
+    )
+
+
+def _decode_teams(row):
+    d = dict(row)
+    d["team1"] = json.loads(d["team1"])
+    d["team2"] = json.loads(d["team2"])
+    return d
+
+
+# ---- Players ---------------------------------------------------------
+
+
+def get_player(guild_id, user_id):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM players WHERE guild_id = ? AND user_id = ?",
+        (guild_id, user_id),
+    ).fetchone()
+    if row:
+        return dict(row)
+    return {"guild_id": guild_id, "user_id": user_id, "mmr": 1000, "wins": 0, "losses": 0}
+
+
+def update_player(guild_id, user_id, *, mmr_new, won):
+    conn = _get_conn()
+    _ensure_player(conn, guild_id, user_id)
+    if won:
+        conn.execute(
+            "UPDATE players SET mmr = ?, wins = wins + 1 WHERE guild_id = ? AND user_id = ?",
+            (mmr_new, guild_id, user_id),
+        )
+    else:
+        conn.execute(
+            "UPDATE players SET mmr = ?, losses = losses + 1 WHERE guild_id = ? AND user_id = ?",
+            (mmr_new, guild_id, user_id),
+        )
+    conn.commit()
+
+
+def set_player_mmr(guild_id, user_id, mmr):
+    conn = _get_conn()
+    _ensure_player(conn, guild_id, user_id)
+    conn.execute(
+        "UPDATE players SET mmr = ? WHERE guild_id = ? AND user_id = ?",
+        (mmr, guild_id, user_id),
+    )
+    conn.commit()
+
+
+def leaderboard(guild_id, limit=10):
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM players WHERE guild_id = ? ORDER BY mmr DESC LIMIT ?",
+        (guild_id, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---- Settings --------------------------------------------------------
+
+
+def set_ping_role(guild_id, role_id):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO settings (guild_id, ping_role_id) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET ping_role_id = excluded.ping_role_id",
+        (guild_id, role_id),
+    )
+    conn.commit()
+
+
+def get_ping_role(guild_id):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT ping_role_id FROM settings WHERE guild_id = ?", (guild_id,)
+    ).fetchone()
+    return row["ping_role_id"] if row else None
+
+
+def set_queue_channel(guild_id, channel_id):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO settings (guild_id, queue_channel_id) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET queue_channel_id = excluded.queue_channel_id",
+        (guild_id, channel_id),
+    )
+    conn.commit()
+
+
+def get_queue_channel(guild_id):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT queue_channel_id FROM settings WHERE guild_id = ?", (guild_id,)
+    ).fetchone()
+    return row["queue_channel_id"] if row else None
+
+
+# ---- Matches ---------------------------------------------------------
+
+
+def create_match(guild_id, team1_ids, team2_ids):
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO matches (guild_id, team1, team2, created_at) VALUES (?, ?, ?, ?)",
+        (
+            guild_id,
+            json.dumps(team1_ids),
+            json.dumps(team2_ids),
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_pending_match_for_user(guild_id, user_id):
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM matches WHERE guild_id = ? AND status = 'pending' ORDER BY id DESC",
+        (guild_id,),
+    ).fetchall()
+    for row in rows:
+        d = _decode_teams(row)
+        if user_id in d["team1"] or user_id in d["team2"]:
+            return d
+    return None
+
+
+def get_active_matches(guild_id):
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM matches WHERE guild_id = ? AND status = 'pending' ORDER BY id DESC",
+        (guild_id,),
+    ).fetchall()
+    return [_decode_teams(r) for r in rows]
+
+
+def report_match(match_id, score1, score2, reported_by):
+    conn = _get_conn()
+    cur = conn.execute(
+        "UPDATE matches SET score1 = ?, score2 = ?, status = 'reported', reported_by = ? "
+        "WHERE id = ? AND status = 'pending'",
+        (score1, score2, reported_by, match_id),
+    )
+    conn.commit()
+    return cur.rowcount == 1
