@@ -46,17 +46,25 @@ def _init_schema(conn):
         CREATE TABLE IF NOT EXISTS settings (
             guild_id INTEGER PRIMARY KEY,
             ping_role_id INTEGER,
-            queue_channel_id INTEGER
+            queue_channel_id INTEGER,
+            base_mmr INTEGER NOT NULL DEFAULT 1000
         );
         """
     )
+
+    # Migrate older databases that lack the base_mmr column
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(settings)").fetchall()]
+    if "base_mmr" not in cols:
+        conn.execute("ALTER TABLE settings ADD COLUMN base_mmr INTEGER NOT NULL DEFAULT 1000")
+
     conn.commit()
 
 
 def _ensure_player(conn, guild_id, user_id):
     conn.execute(
-        "INSERT OR IGNORE INTO players (guild_id, user_id) VALUES (?, ?)",
-        (guild_id, user_id),
+        "INSERT OR IGNORE INTO players (guild_id, user_id, mmr) "
+        "SELECT ?, ?, COALESCE((SELECT base_mmr FROM settings WHERE guild_id = ?), 1000)",
+        (guild_id, user_id, guild_id),
     )
 
 
@@ -78,7 +86,8 @@ def get_player(guild_id, user_id):
     ).fetchone()
     if row:
         return dict(row)
-    return {"guild_id": guild_id, "user_id": user_id, "mmr": 1000, "wins": 0, "losses": 0}
+    base = get_base_mmr(guild_id)
+    return {"guild_id": guild_id, "user_id": user_id, "mmr": base, "wins": 0, "losses": 0}
 
 
 def update_player(guild_id, user_id, *, mmr_new, won):
@@ -103,6 +112,15 @@ def set_player_mmr(guild_id, user_id, mmr):
     conn.execute(
         "UPDATE players SET mmr = ? WHERE guild_id = ? AND user_id = ?",
         (mmr, guild_id, user_id),
+    )
+    conn.commit()
+
+
+def set_all_players_mmr(guild_id, mmr):
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE players SET mmr = ? WHERE guild_id = ?",
+        (mmr, guild_id),
     )
     conn.commit()
 
@@ -153,6 +171,24 @@ def get_queue_channel(guild_id):
         "SELECT queue_channel_id FROM settings WHERE guild_id = ?", (guild_id,)
     ).fetchone()
     return row["queue_channel_id"] if row else None
+
+
+def set_base_mmr(guild_id, mmr):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO settings (guild_id, base_mmr) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET base_mmr = excluded.base_mmr",
+        (guild_id, mmr),
+    )
+    conn.commit()
+
+
+def get_base_mmr(guild_id):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT base_mmr FROM settings WHERE guild_id = ?", (guild_id,)
+    ).fetchone()
+    return row["base_mmr"] if row else 1000
 
 
 # ---- Matches ---------------------------------------------------------
