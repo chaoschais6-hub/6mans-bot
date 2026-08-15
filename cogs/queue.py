@@ -1,15 +1,22 @@
+import time
+
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ext import tasks
 
 import database as db
 from balancing import balance_teams
 
 
+QUEUE_TIMEOUT = 45 * 60  # 45 minutes in seconds
+
+
 class QueueCog(commands.Cog, name="Queue"):
     def __init__(self, bot):
         self.bot = bot
-        self._queues = {}  # guild_id -> dict of user_id -> None (ordered)
+        self._queues = {}  # guild_id -> dict of user_id -> join timestamp (ordered)
+        self._timeout_check.start()
 
     def _queue(self, guild_id):
         return self._queues.setdefault(guild_id, {})
@@ -58,7 +65,7 @@ class QueueCog(commands.Cog, name="Queue"):
             )
             return
 
-        q[user.id] = None
+        q[user.id] = time.time()
         await interaction.response.send_message(
             f"{user.mention} joined the queue. **({len(q)}/6)**", ephemeral=False
         )
@@ -105,6 +112,35 @@ class QueueCog(commands.Cog, name="Queue"):
             f"**Queue ({len(q)}/6):** {mentions}", ephemeral=False
         )
 
+    def cog_unload(self):
+        self._timeout_check.cancel()
+
+    @tasks.loop(minutes=1)
+    async def _timeout_check(self):
+        now = time.time()
+        for guild_id, q in list(self._queues.items()):
+            removed = []
+            for uid, joined in list(q.items()):
+                if now - joined > QUEUE_TIMEOUT:
+                    del q[uid]
+                    removed.append(uid)
+            if not removed:
+                continue
+            guild = self.bot.get_guild(guild_id)
+            if guild is None:
+                continue
+            ch_id = db.get_queue_channel(guild_id)
+            channel = guild.get_channel(ch_id) if ch_id else None
+            member_mentions = [f"<@{uid}>" for uid in removed]
+            msg = f"{' '.join(member_mentions)} removed from queue after 45 minutes of inactivity."
+            if channel:
+                await channel.send(msg)
+            else:
+                for uid in removed:
+                    member = guild.get_member(uid)
+                    if member:
+                        await member.send(msg)
+
     # ----- Prefix commands -----
     @commands.command(name="q", aliases=["queue"], help="Join the 6mans queue")
     async def q_prefix(self, ctx: commands.Context):
@@ -141,7 +177,7 @@ class QueueCog(commands.Cog, name="Queue"):
         if db.get_pending_match_for_user(guild.id, user.id):
             await channel.send(f"{user.mention} you're in an active match. Use `!result` first.")
             return
-        q[user.id] = None
+        q[user.id] = time.time()
         await channel.send(f"{user.mention} joined the queue. **({len(q)}/6)**")
         if len(q) == 6:
             await self._start_match_prefix(guild, q, channel)
@@ -173,6 +209,7 @@ class QueueCog(commands.Cog, name="Queue"):
         a_ids = [uid for uid, _ in team_a]
         b_ids = [uid for uid, _ in team_b]
         match_id = db.create_match(guild.id, a_ids, b_ids)
+        lobby = f"E6M{match_id}"
 
         a_avg = sum(m for _, m in team_a) // 3
         b_avg = sum(m for _, m in team_b) // 3
@@ -190,6 +227,7 @@ class QueueCog(commands.Cog, name="Queue"):
             f"{ping}**Match #{match_id} is live!**\n"
             f"**Team A** (avg MMR {a_avg}): {a_mentions}\n"
             f"**Team B** (avg MMR {b_avg}): {b_mentions}\n"
+            f"**Lobby** (Team A creates private match): Name `{lobby}` | Password `{lobby}`\n"
             f"Winning team reports with `/result <your_score> <opponent_score>`"
         )
 
@@ -203,6 +241,7 @@ class QueueCog(commands.Cog, name="Queue"):
         a_ids = [uid for uid, _ in team_a]
         b_ids = [uid for uid, _ in team_b]
         match_id = db.create_match(guild.id, a_ids, b_ids)
+        lobby = f"E6M{match_id}"
 
         a_avg = sum(m for _, m in team_a) // 3
         b_avg = sum(m for _, m in team_b) // 3
@@ -220,6 +259,7 @@ class QueueCog(commands.Cog, name="Queue"):
             f"{ping}**Match #{match_id} is live!**\n"
             f"**Team A** (avg MMR {a_avg}): {a_mentions}\n"
             f"**Team B** (avg MMR {b_avg}): {b_mentions}\n"
+            f"**Lobby** (Team A creates private match): Name `{lobby}` | Password `{lobby}`\n"
             f"Winning team reports with `!result <your_score> <opponent_score>`"
         )
 
