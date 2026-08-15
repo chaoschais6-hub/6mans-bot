@@ -57,6 +57,24 @@ class SettingsCog(commands.Cog, name="Settings"):
                 ephemeral=True,
             )
 
+    @app_commands.command(
+        name="setqueuetimeout",
+        description="Set how long a player can wait in queue before auto-removed",
+    )
+    @app_commands.describe(minutes="Timeout in minutes (1-720)")
+    @app_commands.default_permissions(manage_roles=True)
+    async def setqueuetimeout(self, interaction: discord.Interaction, minutes: int):
+        if minutes < 1 or minutes > 720:
+            await interaction.response.send_message(
+                "Timeout must be between 1 and 720 minutes.", ephemeral=True
+            )
+            return
+        db.set_queue_timeout(interaction.guild.id, minutes)
+        await interaction.response.send_message(
+            f"Queue timeout set to **{minutes}** minute(s).",
+            ephemeral=True,
+        )
+
 
 async def setup(bot):
     await bot.add_cog(SettingsCog(bot))

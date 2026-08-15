@@ -9,7 +9,7 @@ import database as db
 from balancing import balance_teams
 
 
-QUEUE_TIMEOUT = 45 * 60  # 45 minutes in seconds
+DEFAULT_QUEUE_TIMEOUT = 45  # minutes
 
 
 class QueueCog(commands.Cog, name="Queue"):
@@ -119,9 +119,10 @@ class QueueCog(commands.Cog, name="Queue"):
     async def _timeout_check(self):
         now = time.time()
         for guild_id, q in list(self._queues.items()):
+            timeout = db.get_queue_timeout(guild_id) * 60
             removed = []
             for uid, joined in list(q.items()):
-                if now - joined > QUEUE_TIMEOUT:
+                if now - joined > timeout:
                     del q[uid]
                     removed.append(uid)
             if not removed:
@@ -132,7 +133,7 @@ class QueueCog(commands.Cog, name="Queue"):
             ch_id = db.get_queue_channel(guild_id)
             channel = guild.get_channel(ch_id) if ch_id else None
             member_mentions = [f"<@{uid}>" for uid in removed]
-            msg = f"{' '.join(member_mentions)} removed from queue after 45 minutes of inactivity."
+            msg = f"{' '.join(member_mentions)} removed from queue after {timeout // 60} minute(s) of inactivity."
             if channel:
                 await channel.send(msg)
             else:

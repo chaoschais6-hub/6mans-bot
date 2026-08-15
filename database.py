@@ -48,7 +48,8 @@ def _init_schema(conn):
             ping_role_id INTEGER,
             queue_channel_id INTEGER,
             base_mmr INTEGER NOT NULL DEFAULT 1000,
-            role_mmr TEXT NOT NULL DEFAULT '{}'
+            role_mmr TEXT NOT NULL DEFAULT '{}',
+            queue_timeout INTEGER NOT NULL DEFAULT 45
         );
 
         CREATE TABLE IF NOT EXISTS rl_links (
@@ -67,6 +68,8 @@ def _init_schema(conn):
         conn.execute("ALTER TABLE settings ADD COLUMN base_mmr INTEGER NOT NULL DEFAULT 1000")
     if "role_mmr" not in cols:
         conn.execute("ALTER TABLE settings ADD COLUMN role_mmr TEXT NOT NULL DEFAULT '{}'")
+    if "queue_timeout" not in cols:
+        conn.execute("ALTER TABLE settings ADD COLUMN queue_timeout INTEGER NOT NULL DEFAULT 45")
 
     conn.commit()
 
@@ -184,6 +187,24 @@ def get_queue_channel(guild_id):
         "SELECT queue_channel_id FROM settings WHERE guild_id = ?", (guild_id,)
     ).fetchone()
     return row["queue_channel_id"] if row else None
+
+
+def set_queue_timeout(guild_id, minutes):
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO settings (guild_id, queue_timeout) VALUES (?, ?) "
+        "ON CONFLICT(guild_id) DO UPDATE SET queue_timeout = excluded.queue_timeout",
+        (guild_id, minutes),
+    )
+    conn.commit()
+
+
+def get_queue_timeout(guild_id):
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT queue_timeout FROM settings WHERE guild_id = ?", (guild_id,)
+    ).fetchone()
+    return row["queue_timeout"] if row else 45
 
 
 def set_base_mmr(guild_id, mmr):
